@@ -13,6 +13,7 @@ A local Linux desktop application for recording Operator, Guardian, and Auditor 
 - Lets you browse and open everything under the selected project root.
 - Builds a private, local search index over the project.
 - Accepts natural-language-shaped searches and shows files from the same archived interaction as each direct match.
+- Exports complete ranked search evidence to agent-friendly JSON with one click.
 - Switches cleanly between independent project roots.
 
 ## Install on Linux
@@ -142,6 +143,8 @@ In Orchestra 0.2.2, **Refresh project** and every completed archive rebuild the 
 
 Orchestra 0.2.3 adds a reload icon beside **Project Files**. It refreshes only the file tree, without rescanning workflow coordinates or rebuilding the search index.
 
+Orchestra 0.2.4 adds one-click JSON export for completed searches. Search exports do not change workflow position or project evidence.
+
 ## Project search
 
 The search index is stored at `.project-handoff/search.sqlite3` inside the selected project root. The internal directory name is retained for compatibility with projects created before the Orchestra name was adopted. Nothing is uploaded.
@@ -159,6 +162,28 @@ Indexed content includes:
 Very large text files are indexed from bounded head and tail regions. ZIP text extraction is also bounded. Binary contents are not decoded, but their file and member names remain searchable.
 
 This release uses lexical ranking plus provenance-graph expansion. It does not pretend that lexical matching is an embedding model. The index schema leaves semantic vectors as an optional later layer if actual queries reveal stable synonym or concept-recall misses.
+
+### Export search results
+
+After any successful query, including one with zero matches, click **Export results**. Orchestra writes a collision-safe JSON file to:
+
+```text
+project-root/.project-handoff/search-exports/
+```
+
+No save dialog is shown, so a requested query list can be processed quickly: run a query, export it, and repeat. The export directory is visible beneath `.project-handoff` in Orchestra's file tree. Refresh that tree if the mounted filesystem does not notify the GUI immediately.
+
+Each export contains:
+
+- exact query text, normalized terms, execution timestamp, duration, limit, and returned count;
+- ranked matches in display order with BM25 score semantics, paths, node kind, p-b-v coordinate, snippets, sizes, and modification times;
+- the bounded **Same archived interaction** file set for every ranked match;
+- explicit related-result limits and truncation flags;
+- project and search-index snapshot metadata;
+- Orchestra and export-schema versions, unique query-execution ID, and unique export ID;
+- interpretation notes explaining that snippets are bounded and node IDs are index-local.
+
+Exports are deliberately stored inside `.project-handoff`, which the search crawler ignores. Exporting results therefore cannot cause them to appear in later search results. See `docs/SEARCH_RESULTS_EXPORT.md` for the format contract.
 
 ## Provenance and write safety
 

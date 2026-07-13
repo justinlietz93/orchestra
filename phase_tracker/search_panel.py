@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from .search_engine import ProjectSearchIndex, SearchResult
+from .search import SearchResultsExporter
 
 
 class IndexWorker(QObject):
@@ -54,6 +56,7 @@ class SearchPanel(QFrame):
         self.thread: QThread | None = None
         self.worker: IndexWorker | None = None
         self.results_by_node: dict[int, SearchResult] = {}
+        self.last_export: dict[str, object] | None = None
         self.pending_reindex = False
 
         layout = QVBoxLayout(self)
@@ -65,19 +68,28 @@ class SearchPanel(QFrame):
         self.query = QLineEdit()
         self.query.setPlaceholderText("Ask: what failed around parity seating?")
         self.query.returnPressed.connect(self.run_search)
-        search_button = QPushButton("Search")
-        search_button.setObjectName("primary")
-        search_button.clicked.connect(self.run_search)
+        self.search_button = QPushButton("Search")
+        self.search_button.setObjectName("primary")
+        self.search_button.clicked.connect(self.run_search)
         self.index_button = QPushButton("Reindex")
         self.index_button.clicked.connect(self.reindex)
         query_row.addWidget(self.query, 1)
-        query_row.addWidget(search_button)
+        query_row.addWidget(self.search_button)
         query_row.addWidget(self.index_button)
         layout.addLayout(query_row)
 
+        status_row = QHBoxLayout()
         self.status = QLabel("Choose a project root to build its local index")
         self.status.setObjectName("muted")
-        layout.addWidget(self.status)
+        self.export_button = QPushButton("Export results")
+        self.export_button.setEnabled(False)
+        self.export_button.setToolTip(
+            "Write this query to .project-handoff/search-exports/"
+        )
+        self.export_button.clicked.connect(self.export_results)
+        status_row.addWidget(self.status, 1)
+        status_row.addWidget(self.export_button)
+        layout.addLayout(status_row)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
         self.results = QListWidget()
@@ -110,6 +122,8 @@ class SearchPanel(QFrame):
     def set_root(self, root: Path, auto_index: bool = True) -> None:
         self.root = root.resolve()
         self.index = ProjectSearchIndex(self.root)
+        self.last_export = None
+        self.export_button.setEnabled(False)
         self.results.clear()
         self.related.clear()
         if self.index.db_path.exists():
@@ -126,6 +140,7 @@ class SearchPanel(QFrame):
         self.pending_reindex = False
         self.status.setText("Indexing file content and provenance graph…")
         self.index_button.setEnabled(False)
+        self.search_button.setEnabled(False)
         thread = QThread(self)
         worker = IndexWorker(self.root)
         worker.moveToThread(thread)
@@ -144,11 +159,29 @@ class SearchPanel(QFrame):
     def run_search(self) -> None:
         if not self.index:
             return
+        if self.thread:
+            self.status.setText("Wait for indexing to finish before searching")
+            return
+        self.last_export = None
+        self.export_button.setEnabled(False)
+        started = time.perf_counter()
         try:
             results = self.index.search(self.query.text())
         except Exception as error:
             self.status.setText(f"Search failed: {error}")
             return
+        duration_ms = (time.perf_counter() - started) * 1000
+        try:
+            self.last_export = SearchResultsExporter(self.index).capture(
+                self.query.text(),
+                results,
+                search_duration_ms=duration_ms,
+            )
+            self.export_button.setEnabled(True)
+        except Exception as error:
+            capture_error = str(error)
+        else:
+            capture_error = ""
         self.results.clear()
         self.related.clear()
         self.results_by_node.clear()
@@ -169,9 +202,28 @@ class SearchPanel(QFrame):
             item.setToolTip(result.path)
             self.results.addItem(item)
             self.results_by_node[result.node_id] = result
-        self.status.setText(f"{len(results)} ranked match{'es' if len(results) != 1 else ''}")
+        if capture_error:
+            self.status.setText(f"Results shown; export unavailable: {capture_error}")
+        else:
+            self.status.setText(
+                f"{len(results)} ranked match{'es' if len(results) != 1 else ''}"
+            )
         if results:
             self.results.setCurrentRow(0)
+
+    def export_results(self) -> None:
+        if not self.index or not self.root or not self.last_export:
+            return
+        try:
+            receipt = SearchResultsExporter(self.index).write(self.last_export)
+        except Exception as error:
+            self.status.setText(f"Export failed: {error}")
+            return
+        relative = receipt.path.relative_to(self.root).as_posix()
+        self.status.setText(
+            f"Exported {receipt.ranked_match_count}: search-exports/{receipt.path.name}"
+        )
+        self.status.setToolTip(relative)
 
     @Slot(object)
     def _index_finished(self, summary: dict[str, int]) -> None:
@@ -193,6 +245,7 @@ class SearchPanel(QFrame):
         self.worker = None
         self.thread = None
         self.index_button.setEnabled(True)
+        self.search_button.setEnabled(True)
         if self.pending_reindex:
             self.pending_reindex = False
             self.reindex()

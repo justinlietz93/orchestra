@@ -9,6 +9,7 @@ The application keeps five concerns separate:
 3. `archive_policy.py` grants coordinate creation only to a fresh Auditor Pass or Fail. An Auditor revision triggered by a Guardian failure is locked to the current version with every other non-authoritative return.
 4. `archive.py` performs staged copies, hashes artifacts, writes authoritative manifests, and commits tracker state.
 5. `search_engine.py` derives a disposable local retrieval index from project files. The search database is never authoritative project evidence.
+6. `search/` captures a completed retrieval result and writes a versioned JSON observation without changing the index, archive, or workflow.
 
 The GUI calls these modules but does not reproduce their rules.
 
@@ -49,7 +50,11 @@ project-root/.project-handoff/
 ├── state.json
 ├── state.pending.json    # exists only during a commit or recoverable interruption
 ├── events.jsonl
-└── search.sqlite3
+├── search.sqlite3
+└── search-exports/
+    └── search-<timestamp>-<query>-<id>.json
 ```
 
 `events.jsonl` is a convenience timeline. Per-version manifests remain the authoritative evidence if the event journal ever requires reconstruction.
+
+Search exports are derived observations of a particular query and index snapshot. They are excluded from indexing, carry no workflow authority, and are never treated as archived agent evidence merely because they exist.

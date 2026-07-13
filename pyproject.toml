@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orchestra"
-version = "0.2.3"
+version = "0.2.4"
 description = "Local provenance control for Operator, Guardian, and Auditor handoffs"
 requires-python = ">=3.11"
 dependencies = [
@@ -16,7 +16,7 @@ dependencies = [
 orchestra = "phase_tracker.__main__:main"
 
 [tool.setuptools]
-packages = ["phase_tracker"]
+packages = ["phase_tracker", "phase_tracker.search"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
