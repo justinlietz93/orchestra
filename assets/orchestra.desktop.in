@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Orchestra
+Comment=Archive and route Operator, Guardian, and Auditor handoffs
+Exec="@EXEC@"
+Icon=@ICON@
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=true
+X-GNOME-UsesNotifications=true
