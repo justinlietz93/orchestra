@@ -46,16 +46,18 @@ class SearchExportTests(unittest.TestCase):
         )
 
         self.assertEqual(captured["schema_id"], "orchestra.search-results-export")
-        self.assertEqual(captured["schema_version"], 1)
+        self.assertEqual(captured["schema_version"], 2)
         self.assertTrue(str(captured["query_execution_id"]).startswith("sq_"))
         self.assertTrue(str(captured["captured_at"]).endswith("Z"))
         self.assertIsNone(captured["exported_at"])
-        self.assertEqual(captured["application"]["version"], "0.2.4")
+        self.assertEqual(captured["application"]["version"], "0.2.5")
         self.assertEqual(captured["project"]["root"], str(self.root))
         self.assertEqual(captured["query"]["normalized_terms"], [
             "spectral",
             "fulcrum",
         ])
+        self.assertEqual(captured["query"]["match_mode"], "broad_terms")
+        self.assertEqual(captured["query"]["quoted_phrases"], [])
         self.assertEqual(captured["query"]["search_duration_ms"], 12.346)
         self.assertFalse(captured["query"]["result_limit_reached"])
         self.assertEqual(captured["index_snapshot"]["file_node_count"], 4)
@@ -78,6 +80,24 @@ class SearchExportTests(unittest.TestCase):
         self.assertTrue(related["truncated"])
         self.assertEqual(len(related["files"]), 2)
         self.assertEqual(captured["summary"]["related_file_memberships"], 2)
+
+    def test_capture_records_quoted_and_mixed_query_semantics(self) -> None:
+        query = '"Guardian rejected the spectral parity" bridge'
+        results = self.index.search(query)
+        captured = SearchResultsExporter(self.index).capture(query, results)
+
+        self.assertEqual(captured["query"]["match_mode"], "mixed")
+        self.assertEqual(captured["query"]["normalized_terms"], ["bridge"])
+        self.assertEqual(captured["query"]["quoted_phrases"], [{
+            "raw": "Guardian rejected the spectral parity",
+            "normalized": "guardian rejected the spectral parity",
+            "tokens": ["guardian", "rejected", "the", "spectral", "parity"],
+        }])
+        self.assertEqual(
+            captured["query"]["matching_semantics"]["quoted_phrases"],
+            "all_required_as_case_insensitive_adjacent_token_sequences",
+        )
+        self.assertTrue(captured["ranking"]["quoted_phrase_post_filter"])
 
     def test_write_is_atomic_unique_and_excluded_from_index(self) -> None:
         state_path = self.root / ".project-handoff" / "state.json"

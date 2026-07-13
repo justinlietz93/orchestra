@@ -11,13 +11,13 @@ from pathlib import Path
 from typing import Sequence
 
 from .. import __version__
-from ..content_extractors import query_terms
 from ..search_engine import ProjectSearchIndex, RelatedFile, SearchResult
+from ..search_query import parse_search_query
 from .metadata import index_snapshot, path_metadata
 
 
 SCHEMA_ID = "orchestra.search-results-export"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 EXPORT_DIRECTORY = Path(".project-handoff") / "search-exports"
 
 
@@ -44,6 +44,7 @@ class SearchResultsExporter:
     ) -> dict[str, object]:
         execution_id = self._identifier("sq")
         captured_at = self._utc_now()
+        parsed_query = parse_search_query(query)
         ranked_matches: list[dict[str, object]] = []
         unique_related_paths: set[str] = set()
         total_related_memberships = 0
@@ -102,7 +103,30 @@ class SearchResultsExporter:
             },
             "query": {
                 "raw": query,
-                "normalized_terms": query_terms(query),
+                "match_mode": parsed_query.match_mode,
+                "normalized_terms": list(parsed_query.terms),
+                "quoted_phrases": [
+                    {
+                        "raw": phrase.raw,
+                        "normalized": phrase.normalized,
+                        "tokens": list(phrase.tokens),
+                    }
+                    for phrase in parsed_query.quoted_phrases
+                ],
+                "engine_expression": parsed_query.fts_expression,
+                "matching_semantics": {
+                    "quoted_phrases": (
+                        "all_required_as_case_insensitive_adjacent_token_sequences"
+                        if parsed_query.quoted_phrases
+                        else "not_applicable"
+                    ),
+                    "unquoted_terms": (
+                        "at_least_one_broad_prefix_term_required"
+                        if parsed_query.terms
+                        else "not_applicable"
+                    ),
+                    "punctuation_and_whitespace": "normalized_as_token_boundaries",
+                },
                 "executed_at": captured_at,
                 "result_limit": result_limit,
                 "returned_count": len(results),
@@ -114,6 +138,7 @@ class SearchResultsExporter:
                 "algorithm": "SQLite FTS5 BM25",
                 "ordering": "ascending_score",
                 "score_note": "Lower BM25 values rank before higher values.",
+                "quoted_phrase_post_filter": bool(parsed_query.quoted_phrases),
             },
             "ranked_matches": ranked_matches,
             "summary": {
@@ -125,6 +150,7 @@ class SearchResultsExporter:
                 "Snippets are bounded index excerpts, not complete file contents.",
                 "Same archived interaction means a shared phase, branch, and version.",
                 "Node IDs are local to this disposable search-index snapshot.",
+                "Quoted phrases require the same normalized words together and in order.",
             ],
         }
 

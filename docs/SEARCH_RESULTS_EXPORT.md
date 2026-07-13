@@ -1,6 +1,6 @@
 # Search Results Export
 
-Orchestra 0.2.4 captures a successful project query as portable JSON. The format is designed for returning many search runs to an agent without manually copying each match and related-file list.
+Orchestra 0.2.5 captures a successful project query as portable JSON. The format is designed for returning many search runs to an agent without manually copying each match and related-file list.
 
 ## Fast workflow
 
@@ -17,7 +17,7 @@ The button is enabled for zero-match queries because absence is still a useful s
 ```json
 {
   "schema_id": "orchestra.search-results-export",
-  "schema_version": 1,
+  "schema_version": 2,
   "query_execution_id": "sq_...",
   "captured_at": "2026-07-13T12:34:56.789Z",
   "export_id": "se_...",
@@ -26,6 +26,18 @@ The button is enabled for zero-match queries because absence is still a useful s
 ```
 
 `query_execution_id` identifies one completed query capture. Clicking the export button twice creates two distinct files and export IDs while preserving the same query-execution ID.
+
+Schema version 2 adds explicit quoted-query semantics. The `query` record contains `match_mode`, normalized unquoted terms, raw and normalized quoted phrases, the FTS engine expression, and machine-readable matching rules. Values for `match_mode` are `broad_terms`, `quoted_phrase`, `mixed`, and `empty`.
+
+## Query matching
+
+- Unquoted terms retain broad OR-style prefix matching and FTS stemming.
+- Words inside ASCII double quotes must occur together and in order.
+- Quoted matching is case-insensitive and treats punctuation and whitespace as token boundaries.
+- Every quoted phrase is required.
+- A mixed query requires every phrase and at least one unquoted broad term.
+
+For example, `"Guardian rejected the audit" bridge` requires that exact normalized phrase plus a broad match for `bridge`. The engine uses FTS5 to rank candidates and checks the original indexed fields afterward so stemming cannot loosen a quoted phrase.
 
 ## Ranked matches
 

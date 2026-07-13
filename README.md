@@ -145,11 +145,23 @@ Orchestra 0.2.3 adds a reload icon beside **Project Files**. It refreshes only t
 
 Orchestra 0.2.4 adds one-click JSON export for completed searches. Search exports do not change workflow position or project evidence.
 
+Orchestra 0.2.5 adds exact quoted-phrase search. Unquoted queries keep the existing broad behavior. Double-quoted words must occur together and in order, without changing the index or workflow.
+
+No reindex is required when upgrading from 0.2.4. Existing project search databases already contain the fields needed for quoted matching; reindex only when project files themselves have changed.
+
 ## Project search
 
 The search index is stored at `.project-handoff/search.sqlite3` inside the selected project root. The internal directory name is retained for compatibility with projects created before the Orchestra name was adopted. Nothing is uploaded.
 
 Each project, phase, branch, version, directory, and file is represented as a node. Parent-child containment is retained as graph edges. File names, paths, and extractable content are ranked with SQLite FTS5/BM25. Selecting a direct result expands the version node and lists the other files from that same archived interaction.
+
+Use double quotes when word order matters:
+
+```text
+"Guardian rejected the audit"
+```
+
+Quoted phrases are case-insensitive and normalize punctuation and whitespace as word boundaries. The same normalized words must remain adjacent and in order. Unquoted terms retain broad OR-style prefix matching. A mixed query such as `"Guardian rejected" auditor` requires the exact quoted phrase and at least one broad match for `auditor`. Multiple quoted phrases are all required.
 
 Indexed content includes:
 
@@ -175,7 +187,7 @@ No save dialog is shown, so a requested query list can be processed quickly: run
 
 Each export contains:
 
-- exact query text, normalized terms, execution timestamp, duration, limit, and returned count;
+- exact query text, match mode, normalized broad terms, quoted phrases, executed engine expression, timestamp, duration, limit, and returned count;
 - ranked matches in display order with BM25 score semantics, paths, node kind, p-b-v coordinate, snippets, sizes, and modification times;
 - the bounded **Same archived interaction** file set for every ranked match;
 - explicit related-result limits and truncation flags;

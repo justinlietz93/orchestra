@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from .search_engine import ProjectSearchIndex, SearchResult
 from .search import SearchResultsExporter
+from .search_query import parse_search_query
 
 
 class IndexWorker(QObject):
@@ -66,7 +67,11 @@ class SearchPanel(QFrame):
 
         query_row = QHBoxLayout()
         self.query = QLineEdit()
-        self.query.setPlaceholderText("Ask: what failed around parity seating?")
+        self.query.setPlaceholderText('Search broadly, or use "quotes" for an exact phrase')
+        self.query.setToolTip(
+            'Words inside double quotes must occur together and in order. '
+            "Unquoted words keep broad search behavior."
+        )
         self.query.returnPressed.connect(self.run_search)
         self.search_button = QPushButton("Search")
         self.search_button.setObjectName("primary")
@@ -165,6 +170,7 @@ class SearchPanel(QFrame):
         self.last_export = None
         self.export_button.setEnabled(False)
         started = time.perf_counter()
+        parsed_query = parse_search_query(self.query.text())
         try:
             results = self.index.search(self.query.text())
         except Exception as error:
@@ -205,8 +211,15 @@ class SearchPanel(QFrame):
         if capture_error:
             self.status.setText(f"Results shown; export unavailable: {capture_error}")
         else:
+            mode_label = {
+                "broad_terms": "broad terms",
+                "quoted_phrase": "exact phrase",
+                "mixed": "exact phrase + broad terms",
+                "empty": "empty query",
+            }[parsed_query.match_mode]
             self.status.setText(
                 f"{len(results)} ranked match{'es' if len(results) != 1 else ''}"
+                f" · {mode_label}"
             )
         if results:
             self.results.setCurrentRow(0)

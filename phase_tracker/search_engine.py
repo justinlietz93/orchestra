@@ -7,6 +7,7 @@ from typing import Callable, Iterable
 
 from .content_extractors import extract_searchable_text, query_terms
 from .discovery import BRANCH_PATTERN, VERSION_PATTERN, phase_number_from_name
+from .search_query import fields_match_all_phrases, parse_search_query
 
 
 IGNORED_DIRECTORIES = {".git", ".project-handoff", "node_modules", "__pycache__"}
@@ -134,21 +135,39 @@ class ProjectSearchIndex:
             connection.close()
 
     def search(self, query: str, limit: int = 40) -> list[SearchResult]:
-        terms = query_terms(query)
-        if not terms or not self.db_path.exists():
+        parsed = parse_search_query(query)
+        match_query = parsed.fts_expression
+        if not match_query or not self.db_path.exists():
             return []
-        match_query = " OR ".join(f'"{term}"*' for term in terms)
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         try:
+            phrase_filter = ""
+            if parsed.quoted_phrases:
+                connection.create_function(
+                    "orchestra_phrases_match",
+                    3,
+                    lambda path, name, body: int(fields_match_all_phrases(
+                        parsed.quoted_phrases,
+                        path,
+                        name,
+                        body,
+                    )),
+                    deterministic=True,
+                )
+                phrase_filter = (
+                    "AND orchestra_phrases_match("
+                    "search.path, search.name, search.body) = 1"
+                )
             rows = connection.execute(
-                """
+                f"""
                 SELECT n.id, n.path, n.name, n.kind, n.phase, n.branch, n.version,
                        snippet(search, 2, '<mark>', '</mark>', ' … ', 28) AS snippet,
                        bm25(search, 3.5, 5.0, 1.0) AS rank
                 FROM search
                 JOIN nodes n ON n.id = search.rowid
                 WHERE search MATCH ?
+                {phrase_filter}
                 ORDER BY rank
                 LIMIT ?
                 """,

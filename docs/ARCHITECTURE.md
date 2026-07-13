@@ -2,13 +2,13 @@
 
 ## Authority split
 
-The application keeps five concerns separate:
+The application keeps six concerns separate:
 
 1. `discovery.py` reads the existing phase/branch/version structure and computes unused destinations.
 2. `workflow.py` owns the Operator/Guardian/Auditor state machine.
 3. `archive_policy.py` grants coordinate creation only to a fresh Auditor Pass or Fail. An Auditor revision triggered by a Guardian failure is locked to the current version with every other non-authoritative return.
 4. `archive.py` performs staged copies, hashes artifacts, writes authoritative manifests, and commits tracker state.
-5. `search_engine.py` derives a disposable local retrieval index from project files. The search database is never authoritative project evidence.
+5. `search_query.py` parses broad terms and quoted phrases. `search_engine.py` derives a disposable local retrieval index, ranks candidates with FTS5/BM25, and verifies quoted phrases against original indexed fields.
 6. `search/` captures a completed retrieval result and writes a versioned JSON observation without changing the index, archive, or workflow.
 
 The GUI calls these modules but does not reproduce their rules.
