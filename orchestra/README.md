@@ -1,4 +1,4 @@
-![Orchestra Project Management](/assets/orchestra-banner-2.png)
+# Orchestra
 
 A local Linux desktop application for recording Operator, Guardian, and Auditor interactions without losing the project line, source artifacts, or handoff state.
 
