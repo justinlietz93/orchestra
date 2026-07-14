@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from .. import __version__
 from ..search_engine import ProjectSearchIndex, RelatedFile, SearchResult
@@ -41,6 +41,7 @@ class SearchResultsExporter:
         result_limit: int = 40,
         related_limit: int = 30,
         search_duration_ms: float | None = None,
+        batch: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         execution_id = self._identifier("sq")
         captured_at = self._utc_now()
@@ -97,6 +98,7 @@ class SearchResultsExporter:
             "captured_at": captured_at,
             "exported_at": None,
             "application": {"name": "Orchestra", "version": __version__},
+            "batch": copy.deepcopy(dict(batch)) if batch else None,
             "project": {
                 "name": self.root.name,
                 "root": str(self.root),

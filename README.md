@@ -149,6 +149,8 @@ Orchestra 0.2.5 adds exact quoted-phrase search. Unquoted queries keep the exist
 
 No reindex is required when upgrading from 0.2.4. Existing project search databases already contain the fields needed for quoted matching; reindex only when project files themselves have changed.
 
+Orchestra 0.2.6 adds sequential batch search and export. Paste newline- or comma-separated queries into one editor, then run and export every query to the normal search-export directory. This upgrade also requires no reindex.
+
 ## Project search
 
 The search index is stored at `.project-handoff/search.sqlite3` inside the selected project root. The internal directory name is retained for compatibility with projects created before the Orchestra name was adopted. Nothing is uploaded.
@@ -196,6 +198,14 @@ Each export contains:
 - interpretation notes explaining that snippets are bounded and node IDs are index-local.
 
 Exports are deliberately stored inside `.project-handoff`, which the search crawler ignores. Exporting results therefore cannot cause them to appear in later search results. See `docs/SEARCH_RESULTS_EXPORT.md` for the format contract.
+
+### Batch queries
+
+Click **Batch queries…** beside **Export results**, then paste or type the requested queries. Use one query per line. If the entire batch is on one line, commas separate its queries and commas inside double-quoted phrases are preserved. In multiline input, ordinary commas stay inside their query. Blank entries are ignored, order and duplicates are retained, and an unclosed double quote is reported before execution.
+
+Click **Run and export** to process the list sequentially. A progress window shows the current position and can cancel before the next query. Each completed query, including a zero-match query, receives its own normal JSON file in `.project-handoff/search-exports/`.
+
+Every file includes a shared `batch_execution_id`, the batch start time, its one-based position, and the original query count. Individual failures do not discard successful exports; Orchestra continues through the list and reports failed queries at the end. Batch search never changes phase, branch, version, active role, or workflow evidence.
 
 ## Provenance and write safety
 

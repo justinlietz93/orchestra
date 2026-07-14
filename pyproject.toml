@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orchestra"
-version = "0.2.5"
+version = "0.2.6"
 description = "Local provenance control for Operator, Guardian, and Auditor handoffs"
 requires-python = ">=3.11"
 dependencies = [

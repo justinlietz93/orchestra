@@ -6,20 +6,24 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import (
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
+    QProgressDialog,
     QPushButton,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
+from .batch_query_dialog import BatchQueryDialog
 from .search_engine import ProjectSearchIndex, SearchResult
-from .search import SearchResultsExporter
+from .search import BatchExportReport, SearchResultsExporter, export_batch_queries
 from .search_query import parse_search_query
 
 
@@ -45,6 +49,34 @@ class IndexWorker(QObject):
         self.cancelled = True
 
 
+class BatchSearchWorker(QObject):
+    progress = Signal(int, int, str)
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, root: Path, queries: list[str]):
+        super().__init__()
+        self.root = root
+        self.queries = queries
+        self._cancelled = False
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            report = export_batch_queries(
+                ProjectSearchIndex(self.root),
+                self.queries,
+                progress=self.progress.emit,
+                cancelled=lambda: self._cancelled,
+            )
+            self.finished.emit(report)
+        except Exception as error:
+            self.failed.emit(str(error))
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+
 class SearchPanel(QFrame):
     reveal_requested = Signal(str)
     open_requested = Signal(str)
@@ -56,6 +88,9 @@ class SearchPanel(QFrame):
         self.index: ProjectSearchIndex | None = None
         self.thread: QThread | None = None
         self.worker: IndexWorker | None = None
+        self.batch_thread: QThread | None = None
+        self.batch_worker: BatchSearchWorker | None = None
+        self.batch_progress: QProgressDialog | None = None
         self.results_by_node: dict[int, SearchResult] = {}
         self.last_export: dict[str, object] | None = None
         self.pending_reindex = False
@@ -92,7 +127,14 @@ class SearchPanel(QFrame):
             "Write this query to .project-handoff/search-exports/"
         )
         self.export_button.clicked.connect(self.export_results)
+        self.batch_button = QPushButton("Batch queries…")
+        self.batch_button.setEnabled(False)
+        self.batch_button.setToolTip(
+            "Run and export multiple newline- or comma-separated queries"
+        )
+        self.batch_button.clicked.connect(self.open_batch_queries)
         status_row.addWidget(self.status, 1)
+        status_row.addWidget(self.batch_button)
         status_row.addWidget(self.export_button)
         layout.addLayout(status_row)
 
@@ -125,6 +167,7 @@ class SearchPanel(QFrame):
         layout.addWidget(splitter, 1)
 
     def set_root(self, root: Path, auto_index: bool = True) -> None:
+        self.stop_batch()
         self.root = root.resolve()
         self.index = ProjectSearchIndex(self.root)
         self.last_export = None
@@ -133,11 +176,18 @@ class SearchPanel(QFrame):
         self.related.clear()
         if self.index.db_path.exists():
             self.status.setText("Index ready. Reindex after external file changes.")
+            self.batch_button.setEnabled(True)
         elif auto_index:
             self.reindex()
+        else:
+            self.batch_button.setEnabled(False)
 
     def reindex(self) -> None:
         if not self.root:
+            return
+        if self.batch_thread:
+            self.pending_reindex = True
+            self.status.setText("Reindex queued until the batch export finishes")
             return
         if self.thread:
             self.pending_reindex = True
@@ -146,6 +196,7 @@ class SearchPanel(QFrame):
         self.status.setText("Indexing file content and provenance graph…")
         self.index_button.setEnabled(False)
         self.search_button.setEnabled(False)
+        self.batch_button.setEnabled(False)
         thread = QThread(self)
         worker = IndexWorker(self.root)
         worker.moveToThread(thread)
@@ -163,6 +214,9 @@ class SearchPanel(QFrame):
 
     def run_search(self) -> None:
         if not self.index:
+            return
+        if self.batch_thread:
+            self.status.setText("Wait for the batch export to finish before searching")
             return
         if self.thread:
             self.status.setText("Wait for indexing to finish before searching")
@@ -238,6 +292,143 @@ class SearchPanel(QFrame):
         )
         self.status.setToolTip(relative)
 
+    def open_batch_queries(self) -> None:
+        if not self.root or not self.index or not self.index.db_path.exists():
+            self.status.setText("Build the search index before running a batch")
+            return
+        if self.thread or self.batch_thread:
+            self.status.setText("Wait for current search work to finish")
+            return
+
+        dialog = BatchQueryDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            queries = dialog.queries()
+        except ValueError as error:
+            self.status.setText(str(error))
+            return
+        if not queries:
+            return
+        self._start_batch(queries)
+
+    def _start_batch(self, queries: list[str]) -> None:
+        assert self.root is not None
+        self.search_button.setEnabled(False)
+        self.index_button.setEnabled(False)
+        self.batch_button.setEnabled(False)
+        self.export_button.setEnabled(False)
+        self.status.setText(f"Starting batch of {len(queries)} queries…")
+
+        progress = QProgressDialog(
+            "Preparing batch search…",
+            "Cancel",
+            0,
+            len(queries),
+            self,
+        )
+        progress.setWindowTitle("Batch search and export")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+
+        thread = QThread(self)
+        worker = BatchSearchWorker(self.root, queries)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._batch_progressed)
+        worker.finished.connect(self._batch_finished)
+        worker.failed.connect(self._batch_failed)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(self._batch_thread_finished)
+        progress.canceled.connect(self._cancel_batch)
+
+        self.batch_progress = progress
+        self.batch_thread = thread
+        self.batch_worker = worker
+        progress.show()
+        thread.start()
+
+    @Slot(int, int, str)
+    def _batch_progressed(self, position: int, total: int, query: str) -> None:
+        if not self.batch_progress:
+            return
+        compact_query = " ".join(query.split())
+        if len(compact_query) > 80:
+            compact_query = compact_query[:77] + "…"
+        self.batch_progress.setLabelText(
+            f"Processed {position} of {total}\n{compact_query}"
+        )
+        self.batch_progress.setValue(position)
+
+    @Slot()
+    def _cancel_batch(self) -> None:
+        if self.batch_worker:
+            self.batch_worker.cancel()
+
+    @Slot(object)
+    def _batch_finished(self, report: BatchExportReport) -> None:
+        if self.batch_progress:
+            self.batch_progress.close()
+        exported = len(report.receipts)
+        if report.cancelled:
+            self.status.setText(
+                f"Batch cancelled after {report.completed_query_count} of "
+                f"{report.query_count}; {exported} exported"
+            )
+        elif report.failures:
+            self.status.setText(
+                f"Batch {report.batch_execution_id}: {exported} exported, "
+                f"{len(report.failures)} failed"
+            )
+            details = "\n".join(
+                f"{failure.position}. {failure.query}: {failure.message}"
+                for failure in report.failures[:8]
+            )
+            QMessageBox.warning(
+                self,
+                "Batch export completed with errors",
+                f"{exported} of {report.query_count} queries were exported.\n\n"
+                f"{details}",
+            )
+        else:
+            self.status.setText(
+                f"Exported {exported} batched queries · "
+                f"{report.batch_execution_id}"
+            )
+        self.status.setToolTip(
+            ".project-handoff/search-exports/\n"
+            f"Batch: {report.batch_execution_id}"
+        )
+
+    @Slot(str)
+    def _batch_failed(self, message: str) -> None:
+        if self.batch_progress:
+            self.batch_progress.close()
+        self.status.setText(f"Batch export failed: {message}")
+        QMessageBox.warning(self, "Batch export failed", message)
+
+    @Slot()
+    def _batch_thread_finished(self) -> None:
+        if self.batch_thread:
+            self.batch_thread.deleteLater()
+        self.batch_worker = None
+        self.batch_thread = None
+        self.batch_progress = None
+        self.index_button.setEnabled(True)
+        self.search_button.setEnabled(True)
+        self.batch_button.setEnabled(
+            bool(self.index and self.index.db_path.exists())
+        )
+        self.export_button.setEnabled(self.last_export is not None)
+        if self.pending_reindex:
+            self.pending_reindex = False
+            self.reindex()
+
     @Slot(object)
     def _index_finished(self, summary: dict[str, int]) -> None:
         if summary.get("cancelled"):
@@ -259,6 +450,9 @@ class SearchPanel(QFrame):
         self.thread = None
         self.index_button.setEnabled(True)
         self.search_button.setEnabled(True)
+        self.batch_button.setEnabled(
+            bool(self.index and self.index.db_path.exists())
+        )
         if self.pending_reindex:
             self.pending_reindex = False
             self.reindex()
@@ -292,3 +486,17 @@ class SearchPanel(QFrame):
         self.thread.requestInterruption()
         self.thread.quit()
         self.thread.wait(10000)
+
+    def stop_batch(self) -> None:
+        if self.batch_progress:
+            self.batch_progress.close()
+        if not self.batch_thread or not self.batch_worker:
+            return
+        self.batch_worker.cancel()
+        self.batch_thread.requestInterruption()
+        self.batch_thread.quit()
+        self.batch_thread.wait(10000)
+
+    def stop_background_work(self) -> None:
+        self.stop_indexing()
+        self.stop_batch()

@@ -1,6 +1,6 @@
 # Search Results Export
 
-Orchestra 0.2.5 captures a successful project query as portable JSON. The format is designed for returning many search runs to an agent without manually copying each match and related-file list.
+Orchestra 0.2.6 captures a successful project query as portable JSON. The format is designed for returning many search runs to an agent without manually copying each match and related-file list.
 
 ## Fast workflow
 
@@ -27,6 +27,21 @@ The button is enabled for zero-match queries because absence is still a useful s
 
 `query_execution_id` identifies one completed query capture. Clicking the export button twice creates two distinct files and export IDs while preserving the same query-execution ID.
 
+Normal single-query exports contain `"batch": null`. A batch export instead records:
+
+```json
+{
+  "batch": {
+    "batch_execution_id": "bq_...",
+    "started_at": "2026-07-13T12:34:00.000Z",
+    "position": 3,
+    "query_count": 20
+  }
+}
+```
+
+Each query still has its own query-execution ID and export ID. The shared batch ID and position reconstruct the submitted order without treating the batch as workflow evidence.
+
 Schema version 2 adds explicit quoted-query semantics. The `query` record contains `match_mode`, normalized unquoted terms, raw and normalized quoted phrases, the FTS engine expression, and machine-readable matching rules. Values for `match_mode` are `broad_terms`, `quoted_phrase`, `mixed`, and `empty`.
 
 ## Query matching
@@ -38,6 +53,15 @@ Schema version 2 adds explicit quoted-query semantics. The `query` record contai
 - A mixed query requires every phrase and at least one unquoted broad term.
 
 For example, `"Guardian rejected the audit" bridge` requires that exact normalized phrase plus a broad match for `bridge`. The engine uses FTS5 to rank candidates and checks the original indexed fields afterward so stemming cannot loosen a quoted phrase.
+
+## Batch workflow
+
+1. Click **Batch queries…** beside **Export results**.
+2. Enter one query per line. Ordinary commas are preserved in multiline input.
+3. For a single-line list, commas separate queries; quoted-phrase commas are preserved.
+4. Click **Run and export**.
+
+Queries run sequentially against the current index snapshot. Blank entries are ignored; duplicates and order are preserved. Zero-match queries are exported. Individual query failures are reported after the remaining queries run. Cancellation takes effect before the next query begins.
 
 ## Ranked matches
 
@@ -63,5 +87,6 @@ The export records the search database path, byte size, modification time, nanos
 - Exports do not modify archived interaction manifests.
 - Files are written through a temporary file and atomically moved into place.
 - Unique IDs prevent repeated clicks from overwriting earlier exports.
+- Batch execution does not change the index or workflow and does not combine result sets.
 - `.project-handoff` is excluded from the search crawler, preventing self-indexing loops.
 - Snippets remain bounded excerpts; an export is not a replacement for the underlying project artifacts.

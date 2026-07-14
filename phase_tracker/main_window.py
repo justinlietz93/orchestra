@@ -387,7 +387,7 @@ class MainWindow(QMainWindow):
         return str(events[-1].get("handoff", "")) if events else ""
 
     def closeEvent(self, event) -> None:
-        self.search_panel.stop_indexing()
+        self.search_panel.stop_background_work()
         event.accept()
 
 
