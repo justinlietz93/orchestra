@@ -1,5 +1,8 @@
 ![Orchestra Project Management](/assets/orchestra-banner-2.png)
 
+> Current: v0.3.0
+> Latest release: v0.2.6
+
 A local Linux desktop application for recording Operator, Guardian, and Auditor interactions without losing the project line, source artifacts, or handoff state.
 
 ## What it does
