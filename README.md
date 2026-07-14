@@ -18,6 +18,8 @@ A local Linux desktop application for recording Operator, Guardian, and Auditor 
 - Attaches hashed research summaries to p-b-v history without delivering them to an agent or changing workflow state.
 - Switches cleanly between independent project roots.
 
+![Orchestra Desktop View](/assets/orchestra-start-view.png)
+
 ## Install on Linux
 
 Requirements:
