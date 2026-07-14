@@ -25,6 +25,7 @@ from .batch_query_dialog import BatchQueryDialog
 from .search_engine import ProjectSearchIndex, SearchResult
 from .search import BatchExportReport, SearchResultsExporter, export_batch_queries
 from .search_query import parse_search_query
+from .workbench.launcher import WorkbenchLaunchBar
 
 
 class IndexWorker(QObject):
@@ -118,6 +119,12 @@ class SearchPanel(QFrame):
         query_row.addWidget(self.index_button)
         layout.addLayout(query_row)
 
+        self.workbench_launcher = WorkbenchLaunchBar()
+        self.workbench_launcher.attachment_created.connect(
+            lambda _path: self.reindex()
+        )
+        layout.addWidget(self.workbench_launcher)
+
         status_row = QHBoxLayout()
         self.status = QLabel("Choose a project root to build its local index")
         self.status.setObjectName("muted")
@@ -170,6 +177,7 @@ class SearchPanel(QFrame):
         self.stop_batch()
         self.root = root.resolve()
         self.index = ProjectSearchIndex(self.root)
+        self.workbench_launcher.set_root(self.root)
         self.last_export = None
         self.export_button.setEnabled(False)
         self.results.clear()
@@ -245,6 +253,7 @@ class SearchPanel(QFrame):
         self.results.clear()
         self.related.clear()
         self.results_by_node.clear()
+        self.workbench_launcher.clear_selection()
         for result in results:
             coordinate = ""
             if result.phase is not None:
@@ -255,7 +264,12 @@ class SearchPanel(QFrame):
                     coordinate += f"-v{result.version}"
             snippet = re.sub(r"</?mark>", "", result.snippet)
             snippet = " ".join(snippet.split())
-            text = f"{result.name}\n{coordinate or result.kind} · {snippet[:220]}"
+            badge_text = " · ".join(result.badges)
+            prefix = f"[{badge_text}]\n" if badge_text else ""
+            text = (
+                f"{prefix}{result.name}\n"
+                f"{coordinate or result.kind} · {snippet[:220]}"
+            )
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, result.path)
             item.setData(Qt.ItemDataRole.UserRole + 1, result.node_id)
@@ -460,14 +474,19 @@ class SearchPanel(QFrame):
     def _show_related(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None) -> None:
         self.related.clear()
         if not current or not self.index:
+            self.workbench_launcher.clear_selection()
             return
         node_id = current.data(Qt.ItemDataRole.UserRole + 1)
         result = self.results_by_node.get(int(node_id)) if node_id is not None else None
         if not result:
+            self.workbench_launcher.clear_selection()
             return
+        self.workbench_launcher.set_selection(result.path, result.kind)
         self.reveal_requested.emit(result.path)
         for related in self.index.related_files(result.node_id):
-            item = QListWidgetItem(related.name)
+            badge_text = " · ".join(related.badges)
+            prefix = f"[{badge_text}] " if badge_text else ""
+            item = QListWidgetItem(f"{prefix}{related.name}")
             item.setData(Qt.ItemDataRole.UserRole, related.path)
             item.setToolTip(related.path)
             self.related.addItem(item)
@@ -480,6 +499,7 @@ class SearchPanel(QFrame):
 
     def stop_indexing(self) -> None:
         self.pending_reindex = False
+        self.workbench_launcher.finish_background()
         if not self.thread or not self.worker:
             return
         self.worker.cancel()

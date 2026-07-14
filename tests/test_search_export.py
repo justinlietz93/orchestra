@@ -6,6 +6,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
+import phase_tracker
 from phase_tracker.search import SearchResultsExporter
 from phase_tracker.search_engine import ProjectSearchIndex
 
@@ -50,7 +51,10 @@ class SearchExportTests(unittest.TestCase):
         self.assertTrue(str(captured["query_execution_id"]).startswith("sq_"))
         self.assertTrue(str(captured["captured_at"]).endswith("Z"))
         self.assertIsNone(captured["exported_at"])
-        self.assertEqual(captured["application"]["version"], "0.2.6")
+        self.assertEqual(
+            captured["application"]["version"],
+            phase_tracker.__version__,
+        )
         self.assertIsNone(captured["batch"])
         self.assertEqual(captured["project"]["root"], str(self.root))
         self.assertEqual(captured["query"]["normalized_terms"], [

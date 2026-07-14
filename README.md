@@ -14,6 +14,8 @@ A local Linux desktop application for recording Operator, Guardian, and Auditor 
 - Builds a private, local search index over the project.
 - Accepts natural-language-shaped searches and shows files from the same archived interaction as each direct match.
 - Exports complete ranked search evidence to agent-friendly JSON with one click.
+- Creates immutable, internal-only user Research Runs from explicitly selected project artifacts.
+- Attaches hashed research summaries to p-b-v history without delivering them to an agent or changing workflow state.
 - Switches cleanly between independent project roots.
 
 ## Install on Linux
@@ -151,6 +153,8 @@ No reindex is required when upgrading from 0.2.4. Existing project search databa
 
 Orchestra 0.2.6 adds sequential batch search and export. Paste newline- or comma-separated queries into one editor, then run and export every query to the normal search-export directory. This upgrade also requires no reindex.
 
+Orchestra 0.3.0 adds the user-only Research Workbench sidecar described below. It changes no search, export, batch, or workflow behavior and requires no reindex; workbench badges appear in results after the next reindex of a project that has attachments.
+
 ## Project search
 
 The search index is stored at `.project-handoff/search.sqlite3` inside the selected project root. The internal directory name is retained for compatibility with projects created before the Orchestra name was adopted. Nothing is uploaded.
@@ -206,6 +210,33 @@ Click **Batch queries…** beside **Export results**, then paste or type the req
 Click **Run and export** to process the list sequentially. A progress window shows the current position and can cancel before the next query. Each completed query, including a zero-match query, receives its own normal JSON file in `.project-handoff/search-exports/`.
 
 Every file includes a shared `batch_execution_id`, the batch start time, its one-based position, and the original query count. Individual failures do not discard successful exports; Orchestra continues through the list and reports failed queries at the end. Batch search never changes phase, branch, version, active role, or workflow evidence.
+
+## User Research Workbench
+
+Orchestra 0.3.0 adds the first Research Workbench checkpoint as a separate, user-only sidecar. It is deliberately outside the Operator → Guardian → Auditor pipeline.
+
+1. Search the project and select a graph result.
+2. Click **Research selected graph node**.
+3. Enter a campaign objective and explicitly select one or more project files.
+4. Create the immutable internal-only run.
+5. Review the hashed summary and attach it to a selected p-b-v record if desired.
+
+An attachment is written beneath:
+
+```text
+<p-b-v>/user-research/<attachment-id>/
+├── summary.md
+├── provenance.json
+└── artifact-links.json
+```
+
+The Workbench displays **USER RESEARCH**, **ATTACHED**, and **NOT PROVIDED** badges. Attachment records chronology only. It does not advance phase, branch, or version; change the active role; create an exposure event; imply agent awareness; or promote research into project canon.
+
+Immutable run manifests and exact-byte content objects remain under `.project-handoff/workbench/`. Workbench metadata is stored in `.project-handoff/workbench.sqlite3`. Search indexes the attached p-b-v summary with its warning badges but does not index the private content-addressed object store.
+
+Orchestra does not currently generate outbound agent packages. The Workbench nevertheless supplies and tests a default package exclusion policy: every Operator, Guardian, and Auditor package builder must omit `user-research/` unless a later, explicit role-specific exposure design is implemented. No such exposure action exists in this checkpoint.
+
+See [Research Workbench checkpoint](docs/RESEARCH_WORKBENCH.md) for the exact boundary and storage model. The governing v2 ADR package is preserved unchanged at `docs/orchestra_research_workbench_adrs_v2.zip`.
 
 ## Provenance and write safety
 

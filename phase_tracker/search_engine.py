@@ -24,6 +24,7 @@ class SearchResult:
     version: int | None
     snippet: str
     rank: float
+    badges: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class RelatedFile:
     node_id: int
     path: str
     name: str
+    badges: tuple[str, ...] = ()
 
 
 class ProjectSearchIndex:
@@ -175,6 +177,7 @@ class ProjectSearchIndex:
             ).fetchall()
         finally:
             connection.close()
+        attachment_paths = self._attachment_paths()
         return [
             SearchResult(
                 node_id=row["id"],
@@ -186,6 +189,7 @@ class ProjectSearchIndex:
                 version=row["version"],
                 snippet=row["snippet"] or row["path"],
                 rank=float(row["rank"]),
+                badges=self._badges(row["path"], attachment_paths),
             )
             for row in rows
         ]
@@ -224,7 +228,52 @@ class ProjectSearchIndex:
             ).fetchall()
         finally:
             connection.close()
-        return [RelatedFile(row["id"], row["path"], row["name"]) for row in rows]
+        attachment_paths = self._attachment_paths()
+        return [
+            RelatedFile(
+                row["id"],
+                row["path"],
+                row["name"],
+                self._badges(row["path"], attachment_paths),
+            )
+            for row in rows
+        ]
+
+
+    def _attachment_paths(self) -> set[str]:
+        db_path = self.root / ".project-handoff" / "workbench.sqlite3"
+        if not db_path.exists():
+            return set()
+        try:
+            connection = sqlite3.connect(
+                f"file:{db_path}?mode=ro",
+                uri=True,
+            )
+            try:
+                rows = connection.execute(
+                    "SELECT destination FROM attachments"
+                ).fetchall()
+            finally:
+                connection.close()
+        except sqlite3.Error:
+            return set()
+        return {str(row[0]) for row in rows}
+
+    @staticmethod
+    def _badges(
+        relative_path: str,
+        attachment_paths: set[str],
+    ) -> tuple[str, ...]:
+        parts = Path(relative_path).parts
+        if "user-research" not in parts:
+            return ()
+        position = parts.index("user-research")
+        if len(parts) <= position + 1:
+            return ()
+        attachment = Path(*parts[: position + 2]).as_posix()
+        if attachment in attachment_paths:
+            return ("USER RESEARCH", "ATTACHED", "NOT PROVIDED")
+        return ()
 
     def _create_schema(self, connection: sqlite3.Connection) -> None:
         connection.executescript(

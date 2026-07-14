@@ -41,6 +41,15 @@ QLabel#title {
 }
 QLabel#muted { color: #8ea1b2; }
 QLabel#activeText { color: #58d7e7; font-weight: 700; }
+QLabel#researchBadge {
+    color: #76e7f3;
+    background: #12303a;
+    border: 1px solid #297d8b;
+    border-radius: 5px;
+    padding: 3px 7px;
+    font-size: 10px;
+    font-weight: 700;
+}
 QLineEdit, QPlainTextEdit, QComboBox, QTreeView, QTreeWidget, QListWidget {
     background: #0d131a;
     border: 1px solid #2b3947;
