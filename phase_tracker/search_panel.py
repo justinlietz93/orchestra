@@ -26,6 +26,9 @@ from .search_engine import ProjectSearchIndex, SearchResult
 from .search import BatchExportReport, SearchResultsExporter, export_batch_queries
 from .search_query import parse_search_query
 from .workbench.launcher import WorkbenchLaunchBar
+from . import arxiv_client, crossref_client, pubmed_client, semantic_scholar_client
+from .reference_panel import ExternalResultsDialog, ExternalSearchWorker
+from .references import from_arxiv, provider_label
 
 
 class IndexWorker(QObject):
@@ -90,6 +93,8 @@ class SearchPanel(QFrame):
         self.thread: QThread | None = None
         self.worker: IndexWorker | None = None
         self.batch_thread: QThread | None = None
+        self.external_thread: QThread | None = None
+        self.external_worker: ExternalSearchWorker | None = None
         self.batch_worker: BatchSearchWorker | None = None
         self.batch_progress: QProgressDialog | None = None
         self.results_by_node: dict[int, SearchResult] = {}
@@ -118,6 +123,24 @@ class SearchPanel(QFrame):
         query_row.addWidget(self.search_button)
         query_row.addWidget(self.index_button)
         layout.addLayout(query_row)
+
+        external_row = QHBoxLayout()
+        external_label = QLabel("External:")
+        external_label.setToolTip(
+            "Search public literature providers with the query above. "
+            "Results are external observations and never enter the project index."
+        )
+        external_row.addWidget(external_label)
+        self.external_buttons: dict[str, QPushButton] = {}
+        for provider in ("arxiv", "crossref", "pubmed", "semanticscholar"):
+            button = QPushButton(provider_label(provider))
+            button.clicked.connect(
+                lambda _checked=False, name=provider: self.run_external_search(name)
+            )
+            self.external_buttons[provider] = button
+            external_row.addWidget(button)
+        external_row.addStretch(1)
+        layout.addLayout(external_row)
 
         self.workbench_launcher = WorkbenchLaunchBar()
         self.workbench_launcher.attachment_created.connect(
@@ -517,6 +540,65 @@ class SearchPanel(QFrame):
         self.batch_thread.quit()
         self.batch_thread.wait(10000)
 
+    _EXTERNAL_SEARCHERS = {
+        "arxiv": staticmethod(lambda query: from_arxiv(arxiv_client.search(query))),
+        "crossref": staticmethod(crossref_client.search),
+        "pubmed": staticmethod(pubmed_client.search),
+        "semanticscholar": staticmethod(semantic_scholar_client.search),
+    }
+
+    def run_external_search(self, provider: str) -> None:
+        query = self.query.text().strip()
+        label = provider_label(provider)
+        if not query:
+            self.status.setText(f"Enter a query to search {label}.")
+            return
+        if self.external_thread is not None:
+            self.status.setText("An external search is already running.")
+            return
+        for button in self.external_buttons.values():
+            button.setEnabled(False)
+        self.status.setText(f"Searching {label} for: {query}")
+        searcher = self._EXTERNAL_SEARCHERS[provider].__func__
+        self.external_thread = QThread(self)
+        self.external_worker = ExternalSearchWorker(query, searcher)
+        self.external_worker.moveToThread(self.external_thread)
+        self.external_thread.started.connect(self.external_worker.run)
+        self.external_worker.finished.connect(self._external_finished)
+        self.external_worker.failed.connect(self._external_failed)
+        self.external_thread.start()
+
+    def _external_teardown(self) -> None:
+        if self.external_thread is not None:
+            self.external_thread.quit()
+            self.external_thread.wait()
+        self.external_thread = None
+        self.external_worker = None
+        for button in self.external_buttons.values():
+            button.setEnabled(True)
+
+    def _external_finished(self, outcome, duration_ms: float) -> None:
+        self._external_teardown()
+        label = provider_label(outcome.provider)
+        self.status.setText(
+            f"{label}: {len(outcome.references)} of {outcome.total_available} "
+            f"results for: {outcome.query}"
+        )
+        dialog = ExternalResultsDialog(outcome, duration_ms, self.root, self)
+        dialog.exec()
+
+    def _external_failed(self, message: str) -> None:
+        self._external_teardown()
+        self.status.setText(f"External search failed: {message}")
+
+    def stop_external(self) -> None:
+        if self.external_thread is not None:
+            self.external_thread.quit()
+            self.external_thread.wait()
+            self.external_thread = None
+            self.external_worker = None
+
     def stop_background_work(self) -> None:
         self.stop_indexing()
         self.stop_batch()
+        self.stop_external()
