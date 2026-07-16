@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from .activity_log import ActivityLog
 from .bibtex import format_bibliography
 from .references import (
     ConnectorError,
@@ -75,6 +76,7 @@ class ExternalResultsDialog(QDialog):
         self.outcome = outcome
         self.search_duration_ms = search_duration_ms
         self.root = root
+        self.activity = ActivityLog(root) if root is not None else None
         label = provider_label(outcome.provider)
         self.setWindowTitle(f"{label} results — {outcome.query}")
         self.resize(940, 560)
@@ -190,6 +192,13 @@ class ExternalResultsDialog(QDialog):
             return
         captured = reference_exporter.capture(self.outcome, self.search_duration_ms)
         receipt = reference_exporter.write(self.root, captured)
+        if self.activity:
+            self.activity.record(
+                "export_external_json",
+                provider=self.outcome.provider,
+                file=receipt.path.name,
+                result_count=receipt.result_count,
+            )
         self.status.setText(
             f"Exported {receipt.result_count} results to {receipt.path.name}"
         )
@@ -205,6 +214,13 @@ class ExternalResultsDialog(QDialog):
         path = reference_exporter.write_bibliography(
             self.root, self.outcome, bibliography
         )
+        if self.activity:
+            self.activity.record(
+                "export_bibtex",
+                provider=self.outcome.provider,
+                file=path.name,
+                result_count=len(self.outcome.references),
+            )
         self.status.setText(
             f"Exported {len(self.outcome.references)} BibTeX entries to {path.name}"
         )

@@ -29,6 +29,7 @@ from .workbench.launcher import WorkbenchLaunchBar
 from . import arxiv_client, crossref_client, pubmed_client, semantic_scholar_client
 from .reference_panel import ExternalResultsDialog, ExternalSearchWorker
 from .references import from_arxiv, provider_label
+from .activity_log import ActivityLog
 
 
 class IndexWorker(QObject):
@@ -93,6 +94,8 @@ class SearchPanel(QFrame):
         self.thread: QThread | None = None
         self.worker: IndexWorker | None = None
         self.batch_thread: QThread | None = None
+        self.activity: ActivityLog | None = None
+        self.external_provider: str | None = None
         self.external_thread: QThread | None = None
         self.external_worker: ExternalSearchWorker | None = None
         self.batch_worker: BatchSearchWorker | None = None
@@ -201,6 +204,7 @@ class SearchPanel(QFrame):
         self.root = root.resolve()
         self.index = ProjectSearchIndex(self.root)
         self.workbench_launcher.set_root(self.root)
+        self.activity = ActivityLog(self.root)
         self.last_export = None
         self.export_button.setEnabled(False)
         self.results.clear()
@@ -299,6 +303,15 @@ class SearchPanel(QFrame):
             item.setToolTip(result.path)
             self.results.addItem(item)
             self.results_by_node[result.node_id] = result
+        if self.activity:
+            self.activity.record(
+                "local_search",
+                query=self.query.text(),
+                mode=parsed_query.match_mode,
+                result_count=len(results),
+                duration_ms=round(duration_ms, 2),
+                capture_error=capture_error,
+            )
         if capture_error:
             self.status.setText(f"Results shown; export unavailable: {capture_error}")
         else:
@@ -324,6 +337,12 @@ class SearchPanel(QFrame):
             self.status.setText(f"Export failed: {error}")
             return
         relative = receipt.path.relative_to(self.root).as_posix()
+        if self.activity:
+            self.activity.record(
+                "export_search_json",
+                file=receipt.path.name,
+                result_count=receipt.ranked_match_count,
+            )
         self.status.setText(
             f"Exported {receipt.ranked_match_count}: search-exports/{receipt.path.name}"
         )
@@ -412,6 +431,15 @@ class SearchPanel(QFrame):
         if self.batch_progress:
             self.batch_progress.close()
         exported = len(report.receipts)
+        if self.activity:
+            self.activity.record(
+                "batch",
+                query_count=report.query_count,
+                completed=report.completed_query_count,
+                exported=exported,
+                failed=len(report.failures),
+                cancelled=bool(report.cancelled),
+            )
         if report.cancelled:
             self.status.setText(
                 f"Batch cancelled after {report.completed_query_count} of "
@@ -473,6 +501,13 @@ class SearchPanel(QFrame):
         else:
             self.status.setText(
                 f"Indexed {summary['indexed_files']} files across {summary['nodes']} graph nodes"
+            )
+        if self.activity:
+            self.activity.record(
+                "reindex",
+                cancelled=bool(summary.get("cancelled")),
+                file_count=summary.get("indexed_files"),
+                nodes=summary.get("nodes"),
             )
 
     @Slot(str)
@@ -558,6 +593,7 @@ class SearchPanel(QFrame):
             return
         for button in self.external_buttons.values():
             button.setEnabled(False)
+        self.external_provider = provider
         self.status.setText(f"Searching {label} for: {query}")
         searcher = self._EXTERNAL_SEARCHERS[provider].__func__
         self.external_thread = QThread(self)
@@ -579,6 +615,16 @@ class SearchPanel(QFrame):
 
     def _external_finished(self, outcome, duration_ms: float) -> None:
         self._external_teardown()
+        if self.activity:
+            self.activity.record(
+                "external_search",
+                provider=outcome.provider,
+                query=outcome.query,
+                ok=True,
+                result_count=len(outcome.references),
+                total_available=outcome.total_available,
+                duration_ms=round(duration_ms, 2),
+            )
         label = provider_label(outcome.provider)
         self.status.setText(
             f"{label}: {len(outcome.references)} of {outcome.total_available} "
@@ -589,6 +635,14 @@ class SearchPanel(QFrame):
 
     def _external_failed(self, message: str) -> None:
         self._external_teardown()
+        if self.activity and self.external_provider is not None:
+            self.activity.record(
+                "external_search",
+                provider=self.external_provider,
+                query=self.query.text(),
+                ok=False,
+                error=message,
+            )
         self.status.setText(f"External search failed: {message}")
 
     def stop_external(self) -> None:

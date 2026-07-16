@@ -72,6 +72,12 @@ def append_event(
             "archive_action": placement.target.action.value,
             "placement": placement.relative_folder.as_posix(),
             "source_agent": state.active_agent.value,
+            "guardian_subject": (
+                state.guardian_subject.value if state.guardian_subject else None
+            ),
+            "guardian_subject": (
+                state.guardian_subject.value if state.guardian_subject else None
+            ),
             "auditor_revision": state.auditor_revision,
             "result": transition.result,
             "next_agent": transition.next_state.active_agent.value,

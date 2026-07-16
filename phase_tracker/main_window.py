@@ -1,9 +1,20 @@
 from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
-from PySide6.QtCore import QUrl, Qt
-from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication
+from PySide6.QtCore import QSize, QUrl, Qt
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QDesktopServices,
+    QGuiApplication,
+    QIcon,
+    QPainter,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
+    QStackedWidget,
+    QListWidgetItem,
+    QListWidget,
     QApplication,
     QComboBox,
     QFileDialog,
@@ -34,6 +45,25 @@ from .workflow import (
     describe_position,
 )
 from .workflow_alignment import record_alignment
+def _rail_pixmap(kind: str, color: str) -> QPixmap:
+    """Paint a rail icon: 'window' = 2x2 grid, 'bars' = ascending signal bars."""
+    pixmap = QPixmap(26, 26)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(color))
+    if kind == "window":
+        for x, y in ((2, 2), (14, 2), (2, 14), (14, 14)):
+            painter.drawRoundedRect(x, y, 10, 10, 2.5, 2.5)
+    else:
+        painter.drawRoundedRect(3, 17, 5, 7, 1.5, 1.5)
+        painter.drawRoundedRect(10.5, 11, 5, 13, 1.5, 1.5)
+        painter.drawRoundedRect(18, 3, 5, 21, 1.5, 1.5)
+    painter.end()
+    return pixmap
+
+
 class MainWindow(QMainWindow):
     def __init__(self, initial_root: Path | None = None):
         super().__init__()
@@ -47,6 +77,10 @@ class MainWindow(QMainWindow):
         self.current_coordinate: Coordinate | None = None
         self.last_handoff = ""
         self.archive_service = ArchiveService()
+
+        from .analytics_panel import AnalyticsView
+
+        self.analytics_view = AnalyticsView()
         self._build_menu()
         self._build_ui()
         if initial_root and initial_root.is_dir():
@@ -60,8 +94,16 @@ class MainWindow(QMainWindow):
         refresh = QAction("Refresh project", self)
         refresh.setShortcut("F5")
         refresh.triggered.connect(self.refresh_project)
+        analytics = QAction("Analytics dashboard", self)
+        analytics.setStatusTip(
+            "Switch to the analytics dashboard: metrics, judgments, and SQL "
+            "queries derived from this project's ledgers"
+        )
+        analytics.triggered.connect(lambda: self.app_rail.setCurrentRow(1))
         file_menu.addAction(choose)
         file_menu.addAction(refresh)
+        file_menu.addSeparator()
+        file_menu.addAction(analytics)
         workflow_menu = self.menuBar().addMenu("Workflow")
         reopen = QAction("Reopen completed project", self)
         reopen.triggered.connect(self.reopen_project)
@@ -113,7 +155,57 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 1)
         outer.addWidget(splitter, 1)
-        self.setCentralWidget(central)
+        shell = QWidget()
+        shell_layout = QHBoxLayout(shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+        self.app_rail = QListWidget()
+        self.app_rail.setObjectName("appRail")
+        self.app_rail.setFixedWidth(52)
+        self.app_rail.setIconSize(QSize(26, 26))
+        for kind, tip in (("window", "Workflow dashboard"),
+                          ("bars", "Analytics dashboard")):
+            icon = QIcon()
+            icon.addPixmap(_rail_pixmap(kind, "#7f8ea6"), QIcon.Mode.Normal)
+            icon.addPixmap(_rail_pixmap(kind, "#7fb2ff"), QIcon.Mode.Selected)
+            item = QListWidgetItem(icon, "")
+            item.setToolTip(tip)
+            self.app_rail.addItem(item)
+        self.app_rail.setStyleSheet(
+            """
+            QListWidget#appRail {
+                background: #101623;
+                border: none;
+                border-right: 1px solid #1f2a3d;
+                outline: none;
+                padding-top: 6px;
+            }
+            QListWidget#appRail::item {
+                height: 46px;
+                margin: 4px 6px;
+                border-radius: 8px;
+                color: #7f8ea6;
+            }
+            QListWidget#appRail::item:hover { color: #d6e2f5; }
+            QListWidget#appRail::item:selected {
+                background: #1d2a44;
+                color: #7fb2ff;
+            }
+            """
+        )
+        shell_layout.addWidget(self.app_rail)
+        self.app_stack = QStackedWidget()
+        self.app_stack.addWidget(central)
+        self.app_stack.addWidget(self.analytics_view)
+        shell_layout.addWidget(self.app_stack, 1)
+        self.app_rail.currentRowChanged.connect(self._dashboard_changed)
+        self.app_rail.setCurrentRow(0)
+        self.setCentralWidget(shell)
+
+    def _dashboard_changed(self, index: int) -> None:
+        self.app_stack.setCurrentIndex(index)
+        if index == 1 and self.analytics_view.root is not None:
+            self.analytics_view.refresh()
 
     def _build_work_area(self) -> QWidget:
         area = QWidget()
@@ -187,6 +279,7 @@ class MainWindow(QMainWindow):
         self.last_handoff = self._last_handoff()
         self.refresh_project()
         self.search_panel.set_root(root)
+        self.analytics_view.set_root(root)
 
     def refresh_project(self) -> None:
         if not self.root:
@@ -388,6 +481,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.search_panel.stop_background_work()
+        self.analytics_view.close_connection()
         event.accept()
 
 

@@ -16,6 +16,9 @@ A local Linux desktop application for recording Operator, Guardian, and Auditor 
 - Exports complete ranked search evidence to agent-friendly JSON with one click.
 - Creates immutable, internal-only user Research Runs from explicitly selected project artifacts.
 - Attaches hashed research summaries to p-b-v history without delivering them to an agent or changing workflow state.
+- Searches external literature providers (arXiv, Crossref, PubMed, Semantic Scholar) from the same query box, in a separate results dialog.
+- Exports external results as provider-tagged JSON observations and ready-to-cite BibTeX bibliographies.
+- Records an append-only, local-only activity ledger and derives an observational analytics view (metrics, provider pass/fail rates, daily activity, exportable reports) entirely from existing ledgers.
 - Switches cleanly between independent project roots.
 
 ![Orchestra Desktop View](/assets/orchestra-start-view.png)
@@ -156,6 +159,10 @@ No reindex is required when upgrading from 0.2.4. Existing project search databa
 Orchestra 0.2.6 adds sequential batch search and export. Paste newline- or comma-separated queries into one editor, then run and export every query to the normal search-export directory. This upgrade also requires no reindex.
 
 Orchestra 0.3.0 adds the user-only Research Workbench sidecar described below. It changes no search, export, batch, or workflow behavior and requires no reindex; workbench badges appear in results after the next reindex of a project that has attachments.
+
+Orchestra 0.3.2 adds external literature search: provider buttons under the query row send the current query to arXiv, Crossref, PubMed, or Semantic Scholar. Results open in a dedicated dialog and never enter the project index. Each result set can be exported as a JSON observation (schema family `orchestra.<provider>-results-export`; the arXiv schema advances to version 2) or as a BibTeX bibliography, both written to `.project-handoff/search-exports/`. External connectors use only the standard library and require no keys.
+
+Orchestra 0.3.3 adds observational analytics. Actions (searches, reindexes, external queries, exports, batches) are appended to a local-only ledger at `.project-handoff/activity.jsonl`; the Analytics view derives all metrics from that ledger plus the existing evidence ledgers on demand, and can export the derived report as JSON (`orchestra.activity-report` v1) and Markdown to `.project-handoff/reports/`. Recording is observational: it never mutates workflow, archive, index, or workbench state, activity never enters the search index, and a recording failure can never break the action being recorded.
 
 ## Project search
 
